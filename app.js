@@ -11,37 +11,10 @@ const img = document.getElementById('screen');
 let index = 0;
 let hotspotData = {};
 
-function viewportWidth() {
-  return window.visualViewport?.width ?? window.innerWidth;
-}
-
-function fullDeviceHeight() {
-  const vw = viewportWidth();
-  return Math.round(window.screen.height * (vw / window.screen.width));
-}
-
 function decodeSvgId(id) {
   return id.replace(/_x([0-9a-fA-F]+)_/g, (_, hex) =>
     String.fromCharCode(parseInt(hex, 16))
   );
-}
-
-function isPortraitViewport() {
-  return window.innerHeight > window.innerWidth;
-}
-
-function applyLayout() {
-  const portrait = isPortraitViewport();
-  document.documentElement.classList.toggle('portrait-fit', portrait);
-
-  if (portrait) {
-    const fullH = fullDeviceHeight();
-    document.documentElement.style.height = fullH + 'px';
-    document.body.style.height = fullH + 'px';
-  } else {
-    document.documentElement.style.height = '';
-    document.body.style.height = '';
-  }
 }
 
 function preloadNext(i) {
@@ -101,34 +74,14 @@ async function loadHotspots() {
 }
 
 function getFrame(data) {
-  const refW = img.naturalWidth || data?.refW || viewportWidth();
-  const refH = img.naturalHeight || data?.refH || fullDeviceHeight();
-  const vw = viewportWidth();
-  const vh = window.innerHeight;
-
-  if (isPortraitViewport()) {
-    const scale = vw / refW;
-    return {
-      refW,
-      refH,
-      left: 0,
-      top: 0,
-      width: vw,
-      height: refH * scale,
-      scale,
-    };
-  }
-
-  const scale = vh / refH;
-  const width = refW * scale;
+  const box = img.getBoundingClientRect();
   return {
-    refW,
-    refH,
-    left: (vw - width) / 2,
-    top: 0,
-    width,
-    height: vh,
-    scale,
+    refW: img.naturalWidth || data?.refW || 1,
+    refH: img.naturalHeight || data?.refH || 1,
+    left: box.left,
+    top: box.top,
+    width: box.width,
+    height: box.height,
   };
 }
 
@@ -175,13 +128,9 @@ function handleTap(evt) {
   if (index < screens.length - 1) show(index + 1);
 }
 
-window.addEventListener('resize', applyLayout);
-window.visualViewport?.addEventListener('resize', applyLayout);
-img.addEventListener('load', applyLayout);
 document.body.addEventListener('click', handleTap);
 
 (async function init() {
-  applyLayout();
   await loadHotspots();
   show(0);
 })();

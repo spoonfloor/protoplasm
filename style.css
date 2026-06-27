@@ -7,6 +7,7 @@ body {
   margin: 0;
   padding: 0;
   width: 100%;
+  background: #111;
   overflow-x: hidden;
   touch-action: manipulation;
   -webkit-touch-callout: none;
@@ -14,30 +15,22 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-html.portrait-fit,
-html.portrait-fit body {
-  background: #111;
-  overflow: hidden;
-}
-
-html:not(.portrait-fit),
-html:not(.portrait-fit) body {
-  min-height: 100dvh;
-  background: #111;
-  overflow-y: hidden;
-}
-
 #screen {
   display: block;
-}
-
-html.portrait-fit #screen {
   width: 100%;
   height: auto;
 }
 
-html:not(.portrait-fit) #screen {
-  width: auto;
-  height: 100dvh;
-  margin: 0 auto;
+@media (orientation: landscape) {
+  html,
+  body {
+    min-height: 100dvh;
+    overflow-y: hidden;
+  }
+
+  #screen {
+    width: auto;
+    height: 100dvh;
+    margin: 0 auto;
+  }
 }
