@@ -45,16 +45,15 @@ const Storage = (() => {
     await idbRequest(tx.objectStore(STORE).put(value, key));
   }
 
-  function describeBundle(files, savedAt) {
-    const count = files.filter((f) => Bundle.isImage(f.name)).length;
+  function describeBundle(bundleName, savedAt) {
     const date = new Date(savedAt).toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
     });
-    return { count, label: `${count} screen${count === 1 ? '' : 's'} · ${date}` };
+    return { label: `${bundleName} · ${date}` };
   }
 
-  async function save(fileMap) {
+  async function save(fileMap, bundleName) {
     const files = await Promise.all(
       [...fileMap.entries()].map(async ([name, blob]) => ({
         name,
@@ -63,8 +62,8 @@ const Storage = (() => {
       }))
     );
     const savedAt = Date.now();
-    await set(BUNDLE_KEY, { files, savedAt });
-    return describeBundle(files, savedAt);
+    await set(BUNDLE_KEY, { files, savedAt, bundleName });
+    return describeBundle(bundleName, savedAt);
   }
 
   async function load() {
@@ -77,7 +76,10 @@ const Storage = (() => {
 
     return {
       fileMap,
-      meta: describeBundle(record.files, record.savedAt ?? Date.now()),
+      meta: describeBundle(
+        record.bundleName ?? 'Bundle',
+        record.savedAt ?? Date.now()
+      ),
     };
   }
 
@@ -242,21 +244,14 @@ const Bundle = (() => {
     return { bundle, fileMap };
   }
 
-  async function fromFiles(files) {
-    const entries = files.map((file) => ({ name: file.name, blob: file }));
-    const fileMap = buildFileMap(entries);
-    const bundle = await fromFileMap(fileMap);
-    return { bundle, fileMap };
-  }
-
-  async function fromSelection(files) {
-    if (files.length === 1 && (await isZipFile(files[0]))) {
-      return fromZip(files[0]);
+  async function fromZipFile(file) {
+    if (!(await isZipFile(file))) {
+      throw new Error('Choose a ZIP file.');
     }
-    return fromFiles(files);
+    return fromZip(file);
   }
 
-  return { fromSelection, fromFileMap, isImage };
+  return { fromZipFile, fromFileMap, baseName };
 })();
 
 /* ── Viewer ──────────────────────────────────────────────────────────────── */
@@ -482,18 +477,18 @@ const App = (() => {
   });
 
   fileInput.addEventListener('change', async () => {
-    const files = Array.from(fileInput.files);
+    const file = fileInput.files[0];
     fileInput.value = '';
-    if (!files.length) return;
+    if (!file) return;
 
     setLoading(true);
     clearError();
     try {
-      const { bundle, fileMap } = await Bundle.fromSelection(files);
+      const { bundle, fileMap } = await Bundle.fromZipFile(file);
       Viewer.mount(bundle);
       enterViewer();
 
-      Storage.save(fileMap)
+      Storage.save(fileMap, Bundle.baseName(file.name))
         .then((meta) => {
           savedBundleMeta = meta;
         })
