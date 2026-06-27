@@ -414,6 +414,7 @@ const Viewer = (() => {
   let index = 0;
   let hotspotData = {};
   let blobUrls = [];
+  let scrollPositions = new Map();
   let onExit = () => {};
   let ignoreClickUntil = 0;
 
@@ -493,6 +494,7 @@ const Viewer = (() => {
     screens = bundle.screens;
     hotspotData = bundle.hotspotData;
     blobUrls = bundle.blobUrls;
+    scrollPositions = new Map();
     show(0);
   }
 
@@ -515,13 +517,23 @@ const Viewer = (() => {
     };
   }
 
+  function applyScroll(i) {
+    window.scrollTo(0, scrollPositions.get(i) ?? 0);
+  }
+
   function show(i) {
+    scrollPositions.set(index, window.scrollY);
     index = i;
-    window.scrollTo(0, 0);
     const screen = screens[i];
     img.src = screen.url;
     renderOverlays(screen.overlays ?? []);
     preloadNext(i);
+
+    if (img.complete && img.naturalWidth > 0) {
+      applyScroll(i);
+    } else {
+      img.addEventListener('load', () => applyScroll(i), { once: true });
+    }
   }
 
   function pointerCoords(evt) {
