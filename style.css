@@ -10,16 +10,32 @@ body {
   min-height: 100dvh;
   background: #111;
   overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
   touch-action: manipulation;
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
+html.portrait-fit body {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+html:not(.portrait-fit) body {
+  overflow: hidden;
+}
+
 #screen {
+  display: block;
+}
+
+html.portrait-fit #screen {
   width: 100%;
   height: auto;
-  display: block;
+}
+
+html:not(.portrait-fit) #screen {
+  width: auto;
+  height: 100dvh;
+  margin: 0 auto;
 }

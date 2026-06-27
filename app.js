@@ -17,6 +17,17 @@ function decodeSvgId(id) {
   );
 }
 
+function isPortraitViewport() {
+  return window.innerHeight > window.innerWidth;
+}
+
+function applyLayout() {
+  document.documentElement.classList.toggle(
+    'portrait-fit',
+    isPortraitViewport()
+  );
+}
+
 function preloadNext(i) {
   if (screens[i + 1]) {
     const n = new Image();
@@ -77,13 +88,30 @@ function getFrame(data) {
   const refW = img.naturalWidth || data?.refW || window.innerWidth;
   const refH = img.naturalHeight || data?.refH || window.innerHeight;
   const vw = window.innerWidth;
-  const scale = vw / refW;
+  const vh = window.innerHeight;
 
+  if (isPortraitViewport()) {
+    const scale = vw / refW;
+    return {
+      refW,
+      refH,
+      left: 0,
+      top: 0,
+      width: vw,
+      height: refH * scale,
+      scale,
+    };
+  }
+
+  const scale = vh / refH;
+  const width = refW * scale;
   return {
     refW,
     refH,
-    width: vw,
-    height: refH * scale,
+    left: (vw - width) / 2,
+    top: 0,
+    width,
+    height: vh,
     scale,
   };
 }
@@ -117,8 +145,8 @@ function handleTap(evt) {
 
   if (rects.length > 0) {
     for (let h of rects) {
-      const left = (h.x / frame.refW) * frame.width;
-      const top = (h.y / frame.refH) * frame.height;
+      const left = frame.left + (h.x / frame.refW) * frame.width;
+      const top = frame.top + (h.y / frame.refH) * frame.height;
       const w = (h.w / frame.refW) * frame.width;
       const hgt = (h.h / frame.refH) * frame.height;
 
@@ -138,9 +166,12 @@ function handleTap(evt) {
   if (index < screens.length - 1) show(index + 1);
 }
 
+window.addEventListener('resize', applyLayout);
+img.addEventListener('load', applyLayout);
 document.body.addEventListener('click', handleTap);
 
 (async function init() {
+  applyLayout();
   await loadHotspots();
   show(0);
 })();
