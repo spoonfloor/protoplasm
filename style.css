@@ -7,22 +7,27 @@ body {
   margin: 0;
   padding: 0;
   width: 100%;
-  min-height: 100dvh;
-  background: #111;
-  overflow-x: hidden;
   touch-action: manipulation;
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
+html.portrait-fit,
 html.portrait-fit body {
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  background: #111;
+  overflow: hidden;
 }
 
+html:not(.portrait-fit),
 html:not(.portrait-fit) body {
-  overflow: hidden;
+  min-height: 100dvh;
+  background: #111;
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 #screen {
@@ -31,7 +36,9 @@ html:not(.portrait-fit) body {
 
 html.portrait-fit #screen {
   width: 100%;
-  height: auto;
+  height: 100dvh;
+  object-fit: contain;
+  object-position: top left;
 }
 
 html:not(.portrait-fit) #screen {

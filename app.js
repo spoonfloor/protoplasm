@@ -11,6 +11,13 @@ const img = document.getElementById('screen');
 let index = 0;
 let hotspotData = {};
 
+function viewportSize() {
+  return {
+    w: window.visualViewport?.width ?? window.innerWidth,
+    h: window.visualViewport?.height ?? window.innerHeight,
+  };
+}
+
 function decodeSvgId(id) {
   return id.replace(/_x([0-9a-fA-F]+)_/g, (_, hex) =>
     String.fromCharCode(parseInt(hex, 16))
@@ -18,7 +25,8 @@ function decodeSvgId(id) {
 }
 
 function isPortraitViewport() {
-  return window.innerHeight > window.innerWidth;
+  const { w, h } = viewportSize();
+  return h > w;
 }
 
 function applyLayout() {
@@ -85,19 +93,18 @@ async function loadHotspots() {
 }
 
 function getFrame(data) {
-  const refW = img.naturalWidth || data?.refW || window.innerWidth;
-  const refH = img.naturalHeight || data?.refH || window.innerHeight;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const refW = img.naturalWidth || data?.refW || viewportSize().w;
+  const refH = img.naturalHeight || data?.refH || viewportSize().h;
+  const { w: vw, h: vh } = viewportSize();
 
   if (isPortraitViewport()) {
-    const scale = vw / refW;
+    const scale = Math.min(vw / refW, vh / refH);
     return {
       refW,
       refH,
       left: 0,
       top: 0,
-      width: vw,
+      width: refW * scale,
       height: refH * scale,
       scale,
     };
@@ -140,8 +147,6 @@ function handleTap(evt) {
   const frame = getFrame(data);
 
   const { x, y } = pointerCoords(evt);
-  const tapX = x;
-  const tapY = y + window.scrollY;
 
   if (rects.length > 0) {
     for (let h of rects) {
@@ -150,12 +155,7 @@ function handleTap(evt) {
       const w = (h.w / frame.refW) * frame.width;
       const hgt = (h.h / frame.refH) * frame.height;
 
-      if (
-        tapX >= left &&
-        tapX <= left + w &&
-        tapY >= top &&
-        tapY <= top + hgt
-      ) {
+      if (x >= left && x <= left + w && y >= top && y <= top + hgt) {
         const targetIndex = screens.findIndex((scr) => scr.startsWith(h.id));
         if (targetIndex !== -1) show(targetIndex);
         return;
@@ -167,6 +167,7 @@ function handleTap(evt) {
 }
 
 window.addEventListener('resize', applyLayout);
+window.visualViewport?.addEventListener('resize', applyLayout);
 img.addEventListener('load', applyLayout);
 document.body.addEventListener('click', handleTap);
 

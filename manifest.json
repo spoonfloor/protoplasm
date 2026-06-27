@@ -3,8 +3,8 @@
   "short_name": "Protoplasm",
   "display": "standalone",
   "start_url": "./index.html",
-  "background_color": "#111111",
-  "theme_color": "#111111",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "icons/icon-180.png",
