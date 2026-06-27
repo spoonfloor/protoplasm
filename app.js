@@ -11,11 +11,13 @@ const img = document.getElementById('screen');
 let index = 0;
 let hotspotData = {};
 
-function viewportSize() {
-  return {
-    w: window.visualViewport?.width ?? window.innerWidth,
-    h: window.visualViewport?.height ?? window.innerHeight,
-  };
+function viewportWidth() {
+  return window.visualViewport?.width ?? window.innerWidth;
+}
+
+function fullDeviceHeight() {
+  const vw = viewportWidth();
+  return Math.round(window.screen.height * (vw / window.screen.width));
 }
 
 function decodeSvgId(id) {
@@ -25,15 +27,21 @@ function decodeSvgId(id) {
 }
 
 function isPortraitViewport() {
-  const { w, h } = viewportSize();
-  return h > w;
+  return window.innerHeight > window.innerWidth;
 }
 
 function applyLayout() {
-  document.documentElement.classList.toggle(
-    'portrait-fit',
-    isPortraitViewport()
-  );
+  const portrait = isPortraitViewport();
+  document.documentElement.classList.toggle('portrait-fit', portrait);
+
+  if (portrait) {
+    const fullH = fullDeviceHeight();
+    document.documentElement.style.height = fullH + 'px';
+    document.body.style.height = fullH + 'px';
+  } else {
+    document.documentElement.style.height = '';
+    document.body.style.height = '';
+  }
 }
 
 function preloadNext(i) {
@@ -93,18 +101,19 @@ async function loadHotspots() {
 }
 
 function getFrame(data) {
-  const refW = img.naturalWidth || data?.refW || viewportSize().w;
-  const refH = img.naturalHeight || data?.refH || viewportSize().h;
-  const { w: vw, h: vh } = viewportSize();
+  const refW = img.naturalWidth || data?.refW || viewportWidth();
+  const refH = img.naturalHeight || data?.refH || fullDeviceHeight();
+  const vw = viewportWidth();
+  const vh = window.innerHeight;
 
   if (isPortraitViewport()) {
-    const scale = Math.min(vw / refW, vh / refH);
+    const scale = vw / refW;
     return {
       refW,
       refH,
       left: 0,
       top: 0,
-      width: refW * scale,
+      width: vw,
       height: refH * scale,
       scale,
     };
