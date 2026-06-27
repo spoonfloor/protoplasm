@@ -30,7 +30,35 @@
   </head>
 
   <body>
-    <img id="screen" alt="" />
+    <div id="landing" class="landing">
+      <h1 class="landing-title">Protoplasm</h1>
+      <p id="landing-meta" class="landing-meta" hidden></p>
+      <div class="landing-actions">
+        <button id="btn-continue" class="btn btn-primary" type="button" hidden>
+          Continue
+        </button>
+        <button id="btn-select" class="btn btn-secondary" type="button">
+          Select assets
+        </button>
+      </div>
+      <p id="landing-hint" class="landing-hint">
+        PNG or JPG screens with matching SVG hotspots, bundled in a zip or picked
+        individually.
+      </p>
+      <p id="landing-error" class="landing-error" hidden></p>
+    </div>
+
+    <img id="screen" alt="" hidden />
+
+    <input
+      id="file-input"
+      type="file"
+      accept=".zip,image/png,image/jpeg,image/webp,image/gif,.svg"
+      multiple
+      hidden
+    />
+
+    <script src="vendor/jszip.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
