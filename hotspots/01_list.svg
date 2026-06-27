@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="hotspots" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1179 2556">
+  <!-- Generator: Adobe Illustrator 30.6.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 109)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: none;
+      }
+    </style>
+  </defs>
+  <rect id="_x30_6_x5F_finch" class="st0" y="2113.4" width="1179" height="191.8"/>
+  <rect id="_x30_5_x5F_sparrow" class="st0" y="1672" width="1179" height="441.4"/>
+  <rect id="_x30_4_x5F_junco" class="st0" y="1316" width="1179" height="356"/>
+  <rect id="_x30_3_x5F_towhee" class="st0" y="960" width="1179" height="356"/>
+  <rect id="_x30_2_x5F_hawk" class="st0" y="604" width="1179" height="356"/>
+  <rect id="bounds" class="st0" width="1179" height="2556"/>
+</svg>
