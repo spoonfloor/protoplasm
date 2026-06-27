@@ -1,3 +1,9 @@
+:root {
+  --frame-w: 390;
+  --frame-h: 844;
+  --gap-above-primary-cta: 28px;
+}
+
 html {
   background: #111;
 }
@@ -10,6 +16,7 @@ body {
   min-height: 100dvh;
   background: #111;
   overflow-x: hidden;
+  overflow-y: auto;
   touch-action: manipulation;
   -webkit-touch-callout: none;
   user-select: none;
@@ -20,7 +27,9 @@ body {
 #screen {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
+  margin: 0;
 }
 
 #screen[hidden] {
@@ -29,14 +38,31 @@ body {
 
 .landing {
   box-sizing: border-box;
-  min-height: 100dvh;
+  background: #000;
+  color: #f5f5f5;
+}
+
+.landing-surface {
+  position: relative;
+  box-sizing: border-box;
+  background: #000;
+}
+
+.landing-ui-portal {
+  pointer-events: none;
+}
+
+.landing-ui {
+  box-sizing: border-box;
+  width: calc(var(--frame-w) * 1px);
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
-  color: #f5f5f5;
   text-align: center;
+  transform-origin: center center;
+  pointer-events: auto;
 }
 
 .landing[hidden] {
@@ -51,9 +77,17 @@ body {
 }
 
 .landing-meta {
-  margin: 0 0 28px;
+  margin: 0 0 var(--gap-above-primary-cta);
   font-size: 0.95rem;
   color: #aaa;
+}
+
+.landing-ui:not(:has(.landing-meta:not([hidden]))) .landing-title {
+  margin-bottom: 0;
+}
+
+.landing-ui:not(:has(.landing-meta:not([hidden]))) .landing-actions {
+  margin-top: var(--gap-above-primary-cta);
 }
 
 .landing-actions {
@@ -93,10 +127,12 @@ body {
 
 .landing-hint {
   margin: 0;
-  max-width: 320px;
+  max-width: 280px;
+  padding: 0 16px;
   font-size: 0.85rem;
   line-height: 1.45;
   color: #777;
+  text-wrap: pretty;
 }
 
 .landing-error {
@@ -107,16 +143,86 @@ body {
   color: #ff6b6b;
 }
 
-@media (min-aspect-ratio: 10/9) {
+@media (max-aspect-ratio: 530/980) {
   html,
   body {
-    min-height: 100dvh;
-    overflow-y: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .landing {
+    min-height: unset;
+  }
+
+  .landing-surface {
+    min-height: unset;
+  }
+
+  .landing-ui-portal {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   #screen {
-    width: auto;
-    height: 100dvh;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    margin: 0;
+    object-fit: unset;
+  }
+}
+
+@media (min-aspect-ratio: 530/980) {
+  html,
+  body {
+    overflow-y: hidden;
+  }
+
+  .landing,
+  #screen {
+    width: calc(100dvh * var(--frame-w) / var(--frame-h));
+    max-width: 100%;
     margin: 0 auto;
+  }
+
+  .landing {
+    container-type: size;
+    height: 100dvh;
+    min-height: unset;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .landing-surface {
+    width: calc(var(--frame-w) * 1px);
+    height: calc(var(--frame-h) * 1px);
+    min-height: unset;
+    flex-shrink: 0;
+    transform: scale(calc(100cqh / (var(--frame-h) * 1px)));
+    transform-origin: center center;
+  }
+
+  .landing-ui-portal {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .landing-ui {
+    transform: none;
+  }
+
+  #screen {
+    height: 100dvh;
+    object-fit: contain;
+    background: #000;
   }
 }

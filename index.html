@@ -31,20 +31,26 @@
 
   <body>
     <div id="landing" class="landing">
-      <h1 class="landing-title">Protoplasm</h1>
-      <p id="landing-meta" class="landing-meta" hidden></p>
-      <div class="landing-actions">
-        <button id="btn-continue" class="btn btn-primary" type="button" hidden>
-          Continue
-        </button>
-        <button id="btn-select" class="btn btn-secondary" type="button">
-          Choose File
-        </button>
+      <div class="landing-surface">
+        <div class="landing-ui-portal">
+          <div class="landing-ui">
+            <h1 class="landing-title">Protoplasm</h1>
+            <p id="landing-meta" class="landing-meta" hidden></p>
+            <div class="landing-actions">
+              <button id="btn-continue" class="btn btn-primary" type="button" hidden>
+                Continue
+              </button>
+              <button id="btn-select" class="btn btn-secondary" type="button">
+                Choose File
+              </button>
+            </div>
+            <p id="landing-hint" class="landing-hint">
+              Double-tap with two fingers to exit to home screen.
+            </p>
+            <p id="landing-error" class="landing-error" hidden></p>
+          </div>
+        </div>
       </div>
-      <p id="landing-hint" class="landing-hint">
-        Double-tap with two fingers to exit to home screen.
-      </p>
-      <p id="landing-error" class="landing-error" hidden></p>
     </div>
 
     <img id="screen" alt="" hidden />

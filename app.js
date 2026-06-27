@@ -410,6 +410,37 @@ const Viewer = (() => {
   return { mount, img, setOnExit };
 })();
 
+/* ── Landing UI (tall-mode bitmap scale) ─────────────────────────────────── */
+
+const LandingUi = (() => {
+  const landing = document.getElementById('landing');
+  const ui = document.querySelector('.landing-ui');
+  const tallQuery = window.matchMedia('(max-aspect-ratio: 530/980)');
+  const refW = 390;
+
+  function layout() {
+    if (!ui || landing.hidden) return;
+
+    if (!tallQuery.matches) {
+      ui.style.transform = '';
+      return;
+    }
+
+    ui.style.transform = 'none';
+    const refH = ui.offsetHeight;
+    if (!refH) return;
+
+    const scale = Math.min(window.innerWidth / refW, window.innerHeight / refH);
+    ui.style.transform = `scale(${scale})`;
+  }
+
+  tallQuery.addEventListener('change', layout);
+  window.addEventListener('resize', layout);
+  if (ui) new ResizeObserver(layout).observe(ui);
+
+  return { layout };
+})();
+
 /* ── App (landing UI + lifecycle) ────────────────────────────────────────── */
 
 const App = (() => {
@@ -430,6 +461,7 @@ const App = (() => {
   function showError(message) {
     landingError.textContent = message;
     landingError.hidden = false;
+    requestAnimationFrame(() => LandingUi.layout());
   }
 
   function enterLanding() {
@@ -444,6 +476,8 @@ const App = (() => {
       landingMeta.hidden = true;
       btnContinue.hidden = true;
     }
+
+    requestAnimationFrame(() => LandingUi.layout());
   }
 
   function enterViewer() {
@@ -520,6 +554,11 @@ const App = (() => {
     } finally {
       setLoading(false);
     }
+  });
+
+  document.addEventListener('keydown', (evt) => {
+    if (evt.key !== 'Escape' || !landing.hidden) return;
+    enterLanding();
   });
 
   async function init() {
