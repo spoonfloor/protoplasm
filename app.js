@@ -1,416 +1,479 @@
-const DB_NAME = 'protoplasm';
-const DB_VERSION = 1;
-const STORE = 'bundle';
-const BUNDLE_KEY = 'current';
+/* ── Storage ─────────────────────────────────────────────────────────────── */
 
-const landing = document.getElementById('landing');
-const landingMeta = document.getElementById('landing-meta');
-const landingError = document.getElementById('landing-error');
-const btnContinue = document.getElementById('btn-continue');
-const btnSelect = document.getElementById('btn-select');
-const fileInput = document.getElementById('file-input');
-const img = document.getElementById('screen');
+const Storage = (() => {
+  const DB_NAME = 'protoplasm';
+  const DB_VERSION = 1;
+  const STORE = 'bundle';
+  const BUNDLE_KEY = 'current';
 
-let screens = [];
-let index = 0;
-let hotspotData = {};
-let blobUrls = [];
-let savedBundleMeta = null;
+  let dbPromise = null;
 
-function decodeSvgId(id) {
-  return id.replace(/_x([0-9a-fA-F]+)_/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16))
-  );
-}
+  function openDb() {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onerror = () => {
+          dbPromise = null;
+          reject(req.error);
+        };
+        req.onupgradeneeded = () => {
+          req.result.createObjectStore(STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+      });
+    }
+    return dbPromise;
+  }
 
-function fileName(path) {
-  const parts = path.split(/[/\\]/);
-  return parts[parts.length - 1];
-}
+  function idbRequest(req) {
+    return new Promise((resolve, reject) => {
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+    });
+  }
 
-function baseName(path) {
-  return fileName(path).replace(/\.[^.]+$/, '');
-}
-
-function isImage(name) {
-  return /\.(png|jpe?g|webp|gif)$/i.test(name);
-}
-
-function isSvg(name) {
-  return /\.svg$/i.test(name);
-}
-
-function isIgnored(name) {
-  return (
-    !name ||
-    name.startsWith('.') ||
-    name.startsWith('__MACOSX') ||
-    name.endsWith('.DS_Store')
-  );
-}
-
-function naturalSort(a, b) {
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-}
-
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-  });
-}
-
-async function idbGet(key) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
+  async function get(key) {
+    const db = await openDb();
     const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(key);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => resolve(req.result ?? null);
-    tx.oncomplete = () => db.close();
-  });
-}
+    const value = await idbRequest(tx.objectStore(STORE).get(key));
+    return value ?? null;
+  }
 
-async function idbSet(key, value) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
+  async function set(key, value) {
+    const db = await openDb();
     const tx = db.transaction(STORE, 'readwrite');
-    const req = tx.objectStore(STORE).put(value, key);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => resolve();
-    tx.oncomplete = () => db.close();
-  });
-}
-
-function revokeBlobUrls() {
-  for (const url of blobUrls) URL.revokeObjectURL(url);
-  blobUrls = [];
-}
-
-function parseSvgDimensions(svg) {
-  const viewBox = svg.getAttribute('viewBox');
-  if (viewBox) {
-    const parts = viewBox.trim().split(/[\s,]+/).map(Number);
-    if (parts.length === 4 && parts.every((n) => !Number.isNaN(n))) {
-      return { refW: parts[2], refH: parts[3] };
-    }
+    await idbRequest(tx.objectStore(STORE).put(value, key));
   }
 
-  const w = parseFloat(svg.getAttribute('width'));
-  const h = parseFloat(svg.getAttribute('height'));
-  if (!Number.isNaN(w) && !Number.isNaN(h)) {
-    return { refW: w, refH: h };
+  function describeBundle(files, savedAt) {
+    const count = files.filter((f) => Bundle.isImage(f.name)).length;
+    const date = new Date(savedAt).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+    });
+    return { count, label: `${count} screen${count === 1 ? '' : 's'} · ${date}` };
   }
 
-  return null;
-}
-
-function parseHotspotSvg(txt) {
-  const doc = new DOMParser().parseFromString(txt, 'image/svg+xml');
-  const svg = doc.querySelector('svg');
-  const rects = [...doc.querySelectorAll('rect')].filter(
-    (r) => r.id && r.id !== 'bounds'
-  );
-  const dims = svg ? parseSvgDimensions(svg) : null;
-
-  return {
-    rects: rects.map((r) => ({
-      id: decodeSvgId(r.id),
-      x: parseFloat(r.getAttribute('x')) || 0,
-      y: parseFloat(r.getAttribute('y')) || 0,
-      w: parseFloat(r.getAttribute('width')),
-      h: parseFloat(r.getAttribute('height')),
-    })),
-    refW: dims?.refW ?? null,
-    refH: dims?.refH ?? null,
-  };
-}
-
-function buildFileMap(entries) {
-  const map = new Map();
-
-  for (const entry of entries) {
-    const name = fileName(entry.name);
-    if (isIgnored(name)) continue;
-    map.set(name, entry.blob);
+  async function save(fileMap) {
+    const files = await Promise.all(
+      [...fileMap.entries()].map(async ([name, blob]) => ({
+        name,
+        type: blob.type,
+        data: await blob.arrayBuffer(),
+      }))
+    );
+    const savedAt = Date.now();
+    await set(BUNDLE_KEY, { files, savedAt });
+    return describeBundle(files, savedAt);
   }
 
-  return map;
-}
+  async function load() {
+    const record = await get(BUNDLE_KEY);
+    if (!record?.files?.length) return null;
 
-async function bundleFromFileMap(fileMap) {
-  const imageNames = [...fileMap.keys()].filter(isImage).sort(naturalSort);
-  if (imageNames.length === 0) {
-    throw new Error('No screen images found. Add PNG or JPG files.');
-  }
+    const fileMap = new Map(
+      record.files.map((f) => [f.name, new Blob([f.data], { type: f.type })])
+    );
 
-  const svgByBase = new Map();
-  for (const name of fileMap.keys()) {
-    if (isSvg(name)) svgByBase.set(baseName(name).toLowerCase(), name);
-  }
-
-  const nextScreens = [];
-  const nextHotspots = {};
-
-  for (const name of imageNames) {
-    const blob = fileMap.get(name);
-    const url = URL.createObjectURL(blob);
-    blobUrls.push(url);
-
-    const svgName = svgByBase.get(baseName(name).toLowerCase());
-    if (svgName) {
-      try {
-        const txt = await fileMap.get(svgName).text();
-        nextHotspots[name] = parseHotspotSvg(txt);
-      } catch {
-        nextHotspots[name] = { rects: [], refW: null, refH: null };
-      }
-    } else {
-      nextHotspots[name] = { rects: [], refW: null, refH: null };
-    }
-
-    nextScreens.push({ name, url });
-  }
-
-  return { screens: nextScreens, hotspotData: nextHotspots };
-}
-
-async function persistBundle(fileMap) {
-  const files = await Promise.all(
-    [...fileMap.entries()].map(async ([name, blob]) => ({
-      name,
-      type: blob.type,
-      data: await blob.arrayBuffer(),
-    }))
-  );
-
-  const savedAt = Date.now();
-  await idbSet(BUNDLE_KEY, { files, savedAt });
-  savedBundleMeta = describeBundle(files, savedAt);
-}
-
-function describeBundle(files, savedAt) {
-  const count = files.filter((f) => isImage(f.name)).length;
-  const date = new Date(savedAt).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
-  return { count, label: `${count} screen${count === 1 ? '' : 's'} · ${date}` };
-}
-
-async function loadSavedBundleRecord() {
-  const record = await idbGet(BUNDLE_KEY);
-  if (!record?.files?.length) return null;
-
-  const fileMap = new Map(
-    record.files.map((f) => [f.name, new Blob([f.data], { type: f.type })])
-  );
-
-  return {
-    fileMap,
-    meta: describeBundle(record.files, record.savedAt ?? Date.now()),
-  };
-}
-
-async function ingestFileMap(fileMap) {
-  clearError();
-  revokeBlobUrls();
-
-  const bundle = await bundleFromFileMap(fileMap);
-  screens = bundle.screens;
-  hotspotData = bundle.hotspotData;
-
-  await persistBundle(fileMap);
-  enterViewer();
-  show(0);
-}
-
-async function ingestZip(file) {
-  const zip = await JSZip.loadAsync(file);
-  const entries = [];
-
-  for (const [path, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue;
-    const name = fileName(path);
-    if (isIgnored(name)) continue;
-    entries.push({ name, blob: await entry.async('blob') });
-  }
-
-  return ingestFileMap(buildFileMap(entries));
-}
-
-async function ingestFileList(fileList) {
-  const entries = await Promise.all(
-    [...fileList].map(async (file) => ({
-      name: file.name,
-      blob: file,
-    }))
-  );
-
-  return ingestFileMap(buildFileMap(entries));
-}
-
-async function ingestSelection(fileList) {
-  if (fileList.length === 1 && /\.zip$/i.test(fileList[0].name)) {
-    return ingestZip(fileList[0]);
-  }
-  return ingestFileList(fileList);
-}
-
-function preloadNext(i) {
-  if (screens[i + 1]) {
-    const n = new Image();
-    n.src = screens[i + 1].url;
-  }
-}
-
-function getFrame(data) {
-  const box = img.getBoundingClientRect();
-  return {
-    refW: img.naturalWidth || data?.refW || 1,
-    refH: img.naturalHeight || data?.refH || 1,
-    left: box.left,
-    top: box.top,
-    width: box.width,
-    height: box.height,
-  };
-}
-
-function show(i) {
-  index = i;
-  window.scrollTo(0, 0);
-  img.src = screens[i].url;
-  preloadNext(i);
-}
-
-function pointerCoords(evt) {
-  if (evt.changedTouches?.[0]) {
     return {
-      x: evt.changedTouches[0].clientX,
-      y: evt.changedTouches[0].clientY,
+      fileMap,
+      meta: describeBundle(record.files, record.savedAt ?? Date.now()),
     };
   }
-  return { x: evt.clientX, y: evt.clientY };
-}
 
-function handleTap(evt) {
-  if (landing.hidden === false) return;
+  return { save, load };
+})();
 
-  const screen = screens[index]?.name;
-  if (!screen) return;
+/* ── Bundle (import / parse) ───────────────────────────────────────────── */
 
-  const data = hotspotData[screen];
-  const rects = data?.rects ?? [];
-  const frame = getFrame(data);
-  const { x, y } = pointerCoords(evt);
+const Bundle = (() => {
+  function fileName(path) {
+    const parts = path.split(/[/\\]/);
+    return parts[parts.length - 1];
+  }
 
-  if (rects.length > 0) {
-    for (let h of rects) {
-      const left = frame.left + (h.x / frame.refW) * frame.width;
-      const top = frame.top + (h.y / frame.refH) * frame.height;
-      const w = (h.w / frame.refW) * frame.width;
-      const hgt = (h.h / frame.refH) * frame.height;
+  function baseName(path) {
+    return fileName(path).replace(/\.[^.]+$/, '');
+  }
 
-      if (x >= left && x <= left + w && y >= top && y <= top + hgt) {
-        const targetIndex = screens.findIndex((scr) => scr.name.startsWith(h.id));
-        if (targetIndex !== -1) show(targetIndex);
-        return;
+  function isImage(name) {
+    return /\.(png|jpe?g|webp|gif)$/i.test(name);
+  }
+
+  function isSvg(name) {
+    return /\.svg$/i.test(name);
+  }
+
+  function isIgnored(path) {
+    const name = fileName(path);
+    return (
+      !name ||
+      name.startsWith('.') ||
+      path.includes('__MACOSX') ||
+      name.endsWith('.DS_Store')
+    );
+  }
+
+  function naturalSort(a, b) {
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  function decodeSvgId(id) {
+    return id.replace(/_x([0-9a-fA-F]+)_/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    );
+  }
+
+  function parseSvgDimensions(svg) {
+    const viewBox = svg.getAttribute('viewBox');
+    if (viewBox) {
+      const parts = viewBox.trim().split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts.every((n) => !Number.isNaN(n))) {
+        return { refW: parts[2], refH: parts[3] };
       }
     }
-    return;
+
+    const w = parseFloat(svg.getAttribute('width'));
+    const h = parseFloat(svg.getAttribute('height'));
+    if (!Number.isNaN(w) && !Number.isNaN(h)) {
+      return { refW: w, refH: h };
+    }
+
+    return null;
   }
 
-  if (index < screens.length - 1) show(index + 1);
-}
+  function parseHotspotSvg(txt) {
+    const doc = new DOMParser().parseFromString(txt, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    const rects = [...doc.querySelectorAll('rect')].filter(
+      (r) => r.id && r.id !== 'bounds'
+    );
+    const dims = svg ? parseSvgDimensions(svg) : null;
 
-function clearError() {
-  landingError.hidden = true;
-  landingError.textContent = '';
-}
-
-function showError(message) {
-  landingError.textContent = message;
-  landingError.hidden = false;
-}
-
-function enterLanding() {
-  landing.hidden = false;
-  img.hidden = true;
-
-  if (savedBundleMeta) {
-    landingMeta.textContent = savedBundleMeta.label;
-    landingMeta.hidden = false;
-    btnContinue.hidden = false;
-  } else {
-    landingMeta.hidden = true;
-    btnContinue.hidden = true;
+    return {
+      rects: rects.map((r) => ({
+        id: decodeSvgId(r.id),
+        x: parseFloat(r.getAttribute('x')) || 0,
+        y: parseFloat(r.getAttribute('y')) || 0,
+        w: parseFloat(r.getAttribute('width')),
+        h: parseFloat(r.getAttribute('height')),
+      })),
+      refW: dims?.refW ?? null,
+      refH: dims?.refH ?? null,
+    };
   }
-}
 
-function enterViewer() {
-  landing.hidden = true;
-  img.hidden = false;
-}
+  function buildFileMap(entries) {
+    const map = new Map();
 
-function setLoading(loading) {
-  btnContinue.disabled = loading;
-  btnSelect.disabled = loading;
-}
+    for (const entry of entries) {
+      if (isIgnored(entry.name)) continue;
+      map.set(fileName(entry.name), entry.blob);
+    }
 
-btnSelect.addEventListener('click', () => {
-  clearError();
-  fileInput.click();
-});
-
-fileInput.addEventListener('change', async () => {
-  const files = fileInput.files;
-  fileInput.value = '';
-  if (!files?.length) return;
-
-  setLoading(true);
-  try {
-    await ingestSelection(files);
-  } catch (err) {
-    showError(err.message || 'Could not load assets.');
-    enterLanding();
-  } finally {
-    setLoading(false);
+    return map;
   }
-});
 
-btnContinue.addEventListener('click', async () => {
-  setLoading(true);
-  clearError();
-  try {
-    const saved = await loadSavedBundleRecord();
-    if (!saved) {
-      savedBundleMeta = null;
-      enterLanding();
+  async function fromFileMap(fileMap) {
+    const imageNames = [...fileMap.keys()].filter(isImage).sort(naturalSort);
+    if (imageNames.length === 0) {
+      throw new Error('No screen images found. Add PNG or JPG files.');
+    }
+
+    const svgByBase = new Map();
+    for (const name of fileMap.keys()) {
+      if (isSvg(name)) svgByBase.set(baseName(name).toLowerCase(), name);
+    }
+
+    const screens = [];
+    const hotspotData = {};
+    const blobUrls = [];
+
+    for (const name of imageNames) {
+      const blob = fileMap.get(name);
+      const url = URL.createObjectURL(blob);
+      blobUrls.push(url);
+
+      const svgName = svgByBase.get(baseName(name).toLowerCase());
+      if (svgName) {
+        try {
+          const txt = await fileMap.get(svgName).text();
+          hotspotData[name] = parseHotspotSvg(txt);
+        } catch {
+          hotspotData[name] = { rects: [], refW: null, refH: null };
+        }
+      } else {
+        hotspotData[name] = { rects: [], refW: null, refH: null };
+      }
+
+      screens.push({ name, url });
+    }
+
+    return { screens, hotspotData, blobUrls };
+  }
+
+  async function isZipFile(file) {
+    if (/\.zip$/i.test(file.name)) return true;
+    if (
+      file.type === 'application/zip' ||
+      file.type === 'application/x-zip-compressed'
+    ) {
+      return true;
+    }
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    return head[0] === 0x50 && head[1] === 0x4b;
+  }
+
+  async function fromZip(file) {
+    if (typeof JSZip === 'undefined') {
+      throw new Error('Could not load assets.');
+    }
+
+    const zip = await JSZip.loadAsync(file);
+    const entries = [];
+
+    for (const [path, entry] of Object.entries(zip.files)) {
+      if (entry.dir || isIgnored(path)) continue;
+      entries.push({ name: path, blob: await entry.async('blob') });
+    }
+
+    const fileMap = buildFileMap(entries);
+    const bundle = await fromFileMap(fileMap);
+    return { bundle, fileMap };
+  }
+
+  async function fromFiles(files) {
+    const entries = files.map((file) => ({ name: file.name, blob: file }));
+    const fileMap = buildFileMap(entries);
+    const bundle = await fromFileMap(fileMap);
+    return { bundle, fileMap };
+  }
+
+  async function fromSelection(files) {
+    if (files.length === 1 && (await isZipFile(files[0]))) {
+      return fromZip(files[0]);
+    }
+    return fromFiles(files);
+  }
+
+  return { fromSelection, fromFileMap, isImage };
+})();
+
+/* ── Viewer ──────────────────────────────────────────────────────────────── */
+
+const Viewer = (() => {
+  const img = document.getElementById('screen');
+
+  let screens = [];
+  let index = 0;
+  let hotspotData = {};
+  let blobUrls = [];
+
+  function revokeBlobUrls() {
+    for (const url of blobUrls) URL.revokeObjectURL(url);
+    blobUrls = [];
+  }
+
+  function mount(bundle) {
+    revokeBlobUrls();
+    screens = bundle.screens;
+    hotspotData = bundle.hotspotData;
+    blobUrls = bundle.blobUrls;
+    show(0);
+  }
+
+  function preloadNext(i) {
+    if (screens[i + 1]) {
+      const n = new Image();
+      n.src = screens[i + 1].url;
+    }
+  }
+
+  function getFrame(data) {
+    const box = img.getBoundingClientRect();
+    return {
+      refW: img.naturalWidth || data?.refW || 1,
+      refH: img.naturalHeight || data?.refH || 1,
+      left: box.left,
+      top: box.top,
+      width: box.width,
+      height: box.height,
+    };
+  }
+
+  function show(i) {
+    index = i;
+    window.scrollTo(0, 0);
+    img.src = screens[i].url;
+    preloadNext(i);
+  }
+
+  function pointerCoords(evt) {
+    if (evt.changedTouches?.[0]) {
+      return {
+        x: evt.changedTouches[0].clientX,
+        y: evt.changedTouches[0].clientY,
+      };
+    }
+    return { x: evt.clientX, y: evt.clientY };
+  }
+
+  function handleTap(evt) {
+    const screen = screens[index]?.name;
+    if (!screen) return;
+
+    const data = hotspotData[screen];
+    const rects = data?.rects ?? [];
+    const frame = getFrame(data);
+    const { x, y } = pointerCoords(evt);
+
+    if (rects.length > 0) {
+      for (let h of rects) {
+        const left = frame.left + (h.x / frame.refW) * frame.width;
+        const top = frame.top + (h.y / frame.refH) * frame.height;
+        const w = (h.w / frame.refW) * frame.width;
+        const hgt = (h.h / frame.refH) * frame.height;
+
+        if (x >= left && x <= left + w && y >= top && y <= top + hgt) {
+          const targetIndex = screens.findIndex((scr) => scr.name.startsWith(h.id));
+          if (targetIndex !== -1) show(targetIndex);
+          return;
+        }
+      }
       return;
     }
 
-    savedBundleMeta = saved.meta;
-    await ingestFileMap(saved.fileMap);
-  } catch (err) {
-    showError(err.message || 'Could not restore saved assets.');
-    enterLanding();
-  } finally {
-    setLoading(false);
+    if (index < screens.length - 1) show(index + 1);
   }
-});
 
-document.body.addEventListener('click', handleTap);
+  img.addEventListener('click', handleTap);
 
-(async function init() {
-  try {
-    const saved = await loadSavedBundleRecord();
-    if (saved) savedBundleMeta = saved.meta;
-  } catch {
-    savedBundleMeta = null;
-  }
-  enterLanding();
+  return { mount, img };
 })();
+
+/* ── App (landing UI + lifecycle) ────────────────────────────────────────── */
+
+const App = (() => {
+  const landing = document.getElementById('landing');
+  const landingMeta = document.getElementById('landing-meta');
+  const landingError = document.getElementById('landing-error');
+  const btnContinue = document.getElementById('btn-continue');
+  const btnSelect = document.getElementById('btn-select');
+  const fileInput = document.getElementById('file-input');
+
+  let savedBundleMeta = null;
+
+  function clearError() {
+    landingError.hidden = true;
+    landingError.textContent = '';
+  }
+
+  function showError(message) {
+    landingError.textContent = message;
+    landingError.hidden = false;
+  }
+
+  function enterLanding() {
+    landing.hidden = false;
+    Viewer.img.hidden = true;
+
+    if (savedBundleMeta) {
+      landingMeta.textContent = savedBundleMeta.label;
+      landingMeta.hidden = false;
+      btnContinue.hidden = false;
+    } else {
+      landingMeta.hidden = true;
+      btnContinue.hidden = true;
+    }
+  }
+
+  function enterViewer() {
+    landing.hidden = true;
+    Viewer.img.hidden = false;
+  }
+
+  function setLoading(loading) {
+    btnContinue.disabled = loading;
+    btnSelect.disabled = loading;
+  }
+
+  async function openBundle(fileMap, { persist }) {
+    clearError();
+    const bundle = await Bundle.fromFileMap(fileMap);
+    Viewer.mount(bundle);
+    enterViewer();
+
+    if (persist) {
+      Storage.save(fileMap)
+        .then((meta) => {
+          savedBundleMeta = meta;
+        })
+        .catch(() => {});
+    }
+  }
+
+  btnSelect.addEventListener('click', () => {
+    clearError();
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', async () => {
+    const files = Array.from(fileInput.files);
+    fileInput.value = '';
+    if (!files.length) return;
+
+    setLoading(true);
+    clearError();
+    try {
+      const { bundle, fileMap } = await Bundle.fromSelection(files);
+      Viewer.mount(bundle);
+      enterViewer();
+
+      Storage.save(fileMap)
+        .then((meta) => {
+          savedBundleMeta = meta;
+        })
+        .catch(() => {});
+    } catch (err) {
+      showError(err.message || 'Could not load assets.');
+      enterLanding();
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  btnContinue.addEventListener('click', async () => {
+    setLoading(true);
+    clearError();
+    try {
+      const saved = await Storage.load();
+      if (!saved) {
+        savedBundleMeta = null;
+        enterLanding();
+        return;
+      }
+
+      savedBundleMeta = saved.meta;
+      await openBundle(saved.fileMap, { persist: false });
+    } catch (err) {
+      showError(err.message || 'Could not restore saved assets.');
+      enterLanding();
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  async function init() {
+    try {
+      const saved = await Storage.load();
+      if (saved) savedBundleMeta = saved.meta;
+    } catch {
+      savedBundleMeta = null;
+    }
+    enterLanding();
+  }
+
+  return { init };
+})();
+
+App.init();
