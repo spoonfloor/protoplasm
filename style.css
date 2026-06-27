@@ -107,7 +107,7 @@ body {
   color: #ff6b6b;
 }
 
-@media (orientation: landscape) {
+@media (min-aspect-ratio: 10/9) {
   html,
   body {
     min-height: 100dvh;

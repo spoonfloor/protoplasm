@@ -264,14 +264,69 @@ const Bundle = (() => {
 const Viewer = (() => {
   const img = document.getElementById('screen');
 
+  const TAP_MAX_MS = 350;
+  const DOUBLE_TAP_WINDOW_MS = 450;
+
   let screens = [];
   let index = 0;
   let hotspotData = {};
   let blobUrls = [];
+  let onExit = () => {};
+  let ignoreClickUntil = 0;
+
+  let twoFingerActive = false;
+  let twoFingerStart = 0;
+  let twoFingerTapCount = 0;
+  let twoFingerLastTap = 0;
 
   function revokeBlobUrls() {
     for (const url of blobUrls) URL.revokeObjectURL(url);
     blobUrls = [];
+  }
+
+  function resetTwoFingerGesture() {
+    twoFingerActive = false;
+    twoFingerStart = 0;
+  }
+
+  function registerTwoFingerTap(evt) {
+    const now = Date.now();
+    if (twoFingerLastTap && now - twoFingerLastTap > DOUBLE_TAP_WINDOW_MS) {
+      twoFingerTapCount = 0;
+    }
+
+    twoFingerTapCount += 1;
+    twoFingerLastTap = now;
+
+    if (twoFingerTapCount >= 2) {
+      twoFingerTapCount = 0;
+      twoFingerLastTap = 0;
+      ignoreClickUntil = now + 500;
+      evt.preventDefault();
+      onExit();
+    }
+  }
+
+  function handleTouchStart(evt) {
+    if (evt.touches.length === 2) {
+      twoFingerActive = true;
+      twoFingerStart = Date.now();
+    } else {
+      resetTwoFingerGesture();
+    }
+  }
+
+  function handleTouchEnd(evt) {
+    if (evt.touches.length > 0) return;
+
+    if (!twoFingerActive) return;
+
+    const duration = Date.now() - twoFingerStart;
+    resetTwoFingerGesture();
+
+    if (duration > TAP_MAX_MS) return;
+
+    registerTwoFingerTap(evt);
   }
 
   function mount(bundle) {
@@ -319,6 +374,8 @@ const Viewer = (() => {
   }
 
   function handleTap(evt) {
+    if (Date.now() < ignoreClickUntil) return;
+
     const screen = screens[index]?.name;
     if (!screen) return;
 
@@ -347,8 +404,15 @@ const Viewer = (() => {
   }
 
   img.addEventListener('click', handleTap);
+  img.addEventListener('touchstart', handleTouchStart, { passive: true });
+  img.addEventListener('touchend', handleTouchEnd, { passive: false });
+  img.addEventListener('touchcancel', resetTwoFingerGesture, { passive: true });
 
-  return { mount, img };
+  function setOnExit(fn) {
+    onExit = fn;
+  }
+
+  return { mount, img, setOnExit };
 })();
 
 /* ── App (landing UI + lifecycle) ────────────────────────────────────────── */
@@ -464,6 +528,8 @@ const App = (() => {
   });
 
   async function init() {
+    Viewer.setOnExit(enterLanding);
+
     try {
       const saved = await Storage.load();
       if (saved) savedBundleMeta = saved.meta;
