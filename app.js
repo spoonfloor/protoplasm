@@ -1,3 +1,25 @@
+/* ── MIME helpers (iOS Safari needs typed blobs for blob: URLs) ──────────── */
+
+const MIME_BY_EXT = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+};
+
+function mimeTypeFor(name, fallback = '') {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  return MIME_BY_EXT[ext] ?? fallback;
+}
+
+function blobWithMime(name, blob) {
+  const type = mimeTypeFor(name, blob.type);
+  if (!type || blob.type === type) return blob;
+  return new Blob([blob], { type });
+}
+
 /* ── Storage ─────────────────────────────────────────────────────────────── */
 
 const Storage = (() => {
@@ -57,7 +79,7 @@ const Storage = (() => {
     const files = await Promise.all(
       [...fileMap.entries()].map(async ([name, blob]) => ({
         name,
-        type: blob.type,
+        type: mimeTypeFor(name, blob.type),
         data: await blob.arrayBuffer(),
       }))
     );
@@ -71,7 +93,10 @@ const Storage = (() => {
     if (!record?.files?.length) return null;
 
     const fileMap = new Map(
-      record.files.map((f) => [f.name, new Blob([f.data], { type: f.type })])
+      record.files.map((f) => [
+        f.name,
+        new Blob([f.data], { type: mimeTypeFor(f.name, f.type) }),
+      ])
     );
 
     return {
@@ -219,7 +244,8 @@ const Bundle = (() => {
 
     for (const entry of entries) {
       if (isIgnored(entry.name)) continue;
-      map.set(fileName(entry.name), entry.blob);
+      const name = fileName(entry.name);
+      map.set(name, blobWithMime(name, entry.blob));
     }
 
     return map;
