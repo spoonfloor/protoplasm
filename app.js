@@ -120,6 +120,55 @@ const Bundle = (() => {
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
   }
 
+  const INDEX_BASE = 'index';
+  const EXT_PRIORITY = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
+  const OVERLAY_ANCHORS = ['tl', 'tc', 'tr', 'ml', 'mc', 'mr', 'bl', 'bc', 'br'];
+  const OVERLAY_KEY_RE = new RegExp(`^(.+)_(${OVERLAY_ANCHORS.join('|')})$`, 'i');
+  const GLOBAL_OVERLAY_PREFIX = 'global';
+
+  function parseOverlayKey(name) {
+    const match = baseName(name).match(OVERLAY_KEY_RE);
+    if (!match) return null;
+    return { prefix: match[1].toLowerCase(), anchor: match[2].toLowerCase() };
+  }
+
+  function isOverlayImage(name) {
+    return parseOverlayKey(name) !== null;
+  }
+
+  function isScreenImage(name) {
+    return isImage(name) && !isOverlayImage(name);
+  }
+
+  function extRank(name) {
+    const ext = fileName(name).split('.').pop()?.toLowerCase() ?? '';
+    const rank = EXT_PRIORITY.indexOf(ext);
+    return rank === -1 ? EXT_PRIORITY.length : rank;
+  }
+
+  function isIndexScreen(name) {
+    return baseName(name).toLowerCase() === INDEX_BASE;
+  }
+
+  function compareIndexCandidates(a, b) {
+    const rankDiff = extRank(a) - extRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return naturalSort(a, b);
+  }
+
+  function sortScreens(names) {
+    const indexCandidates = names.filter(isIndexScreen);
+    const rest = names.filter((n) => !isIndexScreen(n));
+
+    if (indexCandidates.length === 0) {
+      return [...names].sort(naturalSort);
+    }
+
+    const indexWinner = [...indexCandidates].sort(compareIndexCandidates)[0];
+    const others = names.filter((n) => n !== indexWinner).sort(naturalSort);
+    return [indexWinner, ...others];
+  }
+
   function decodeSvgId(id) {
     return id.replace(/_x([0-9a-fA-F]+)_/g, (_, hex) =>
       String.fromCharCode(parseInt(hex, 16))
@@ -176,8 +225,70 @@ const Bundle = (() => {
     return map;
   }
 
+  async function loadHotspotData(svgByBase, fileMap, key) {
+    const svgName = svgByBase.get(key.toLowerCase());
+    if (!svgName) return { rects: [], refW: null, refH: null };
+
+    try {
+      const txt = await fileMap.get(svgName).text();
+      return parseHotspotSvg(txt);
+    } catch {
+      return { rects: [], refW: null, refH: null };
+    }
+  }
+
+  async function buildOverlay(fileMap, svgByBase, name, blobUrls) {
+    const key = parseOverlayKey(name);
+    if (!key) return null;
+
+    const blob = fileMap.get(name);
+    if (!blob) return null;
+
+    const url = URL.createObjectURL(blob);
+    blobUrls.push(url);
+
+    return {
+      anchor: key.anchor,
+      name,
+      url,
+      hotspotData: await loadHotspotData(svgByBase, fileMap, baseName(name)),
+    };
+  }
+
+  async function resolveOverlays(screenBase, overlayImages, globalOverlays, fileMap, svgByBase, blobUrls) {
+    const overlays = [];
+
+    for (const anchor of OVERLAY_ANCHORS) {
+      const screenOverlayName = overlayImages.get(`${screenBase}:${anchor}`);
+      if (screenOverlayName) {
+        const overlay = await buildOverlay(fileMap, svgByBase, screenOverlayName, blobUrls);
+        if (overlay) overlays.push(overlay);
+        continue;
+      }
+
+      const globalOverlay = globalOverlays.get(anchor);
+      if (globalOverlay) overlays.push(globalOverlay);
+    }
+
+    return overlays;
+  }
+
   async function fromFileMap(fileMap) {
-    const imageNames = [...fileMap.keys()].filter(isImage).sort(naturalSort);
+    const overlayImages = new Map();
+    const screenImages = [];
+
+    for (const name of fileMap.keys()) {
+      if (!isScreenImage(name)) {
+        if (isOverlayImage(name)) {
+          const key = parseOverlayKey(name);
+          overlayImages.set(`${key.prefix}:${key.anchor}`, name);
+        }
+        continue;
+      }
+      screenImages.push(name);
+    }
+
+    const imageNames = sortScreens(screenImages);
     if (imageNames.length === 0) {
       throw new Error('No screen images found. Add PNG or JPG files.');
     }
@@ -190,25 +301,34 @@ const Bundle = (() => {
     const screens = [];
     const hotspotData = {};
     const blobUrls = [];
+    const globalOverlays = new Map();
+
+    for (const anchor of OVERLAY_ANCHORS) {
+      const overlayName = overlayImages.get(`${GLOBAL_OVERLAY_PREFIX}:${anchor}`);
+      if (!overlayName) continue;
+
+      const overlay = await buildOverlay(fileMap, svgByBase, overlayName, blobUrls);
+      if (overlay) globalOverlays.set(anchor, overlay);
+    }
 
     for (const name of imageNames) {
       const blob = fileMap.get(name);
       const url = URL.createObjectURL(blob);
       blobUrls.push(url);
 
-      const svgName = svgByBase.get(baseName(name).toLowerCase());
-      if (svgName) {
-        try {
-          const txt = await fileMap.get(svgName).text();
-          hotspotData[name] = parseHotspotSvg(txt);
-        } catch {
-          hotspotData[name] = { rects: [], refW: null, refH: null };
-        }
-      } else {
-        hotspotData[name] = { rects: [], refW: null, refH: null };
-      }
+      hotspotData[name] = await loadHotspotData(svgByBase, fileMap, baseName(name));
 
-      screens.push({ name, url });
+      const screenBase = baseName(name).toLowerCase();
+      const overlays = await resolveOverlays(
+        screenBase,
+        overlayImages,
+        globalOverlays,
+        fileMap,
+        svgByBase,
+        blobUrls
+      );
+
+      screens.push({ name, url, overlays });
     }
 
     return { screens, hotspotData, blobUrls };
@@ -257,7 +377,9 @@ const Bundle = (() => {
 /* ── Viewer ──────────────────────────────────────────────────────────────── */
 
 const Viewer = (() => {
+  const viewer = document.getElementById('viewer');
   const img = document.getElementById('screen');
+  const overlaysEl = document.getElementById('overlays');
 
   const TAP_MAX_MS = 350;
   const DOUBLE_TAP_WINDOW_MS = 450;
@@ -277,6 +399,22 @@ const Viewer = (() => {
   function revokeBlobUrls() {
     for (const url of blobUrls) URL.revokeObjectURL(url);
     blobUrls = [];
+  }
+
+  function clearOverlays() {
+    overlaysEl.replaceChildren();
+  }
+
+  function renderOverlays(overlays) {
+    clearOverlays();
+    for (const overlay of overlays) {
+      const el = document.createElement('img');
+      el.className = 'viewer-overlay';
+      el.dataset.anchor = overlay.anchor;
+      el.src = overlay.url;
+      el.alt = '';
+      overlaysEl.appendChild(el);
+    }
   }
 
   function resetTwoFingerGesture() {
@@ -339,11 +477,11 @@ const Viewer = (() => {
     }
   }
 
-  function getFrame(data) {
-    const box = img.getBoundingClientRect();
+  function getFrame(element, data) {
+    const box = element.getBoundingClientRect();
     return {
-      refW: img.naturalWidth || data?.refW || 1,
-      refH: img.naturalHeight || data?.refH || 1,
+      refW: element.naturalWidth || data?.refW || 1,
+      refH: element.naturalHeight || data?.refH || 1,
       left: box.left,
       top: box.top,
       width: box.width,
@@ -354,7 +492,9 @@ const Viewer = (() => {
   function show(i) {
     index = i;
     window.scrollTo(0, 0);
-    img.src = screens[i].url;
+    const screen = screens[i];
+    img.src = screen.url;
+    renderOverlays(screen.overlays ?? []);
     preloadNext(i);
   }
 
@@ -368,29 +508,60 @@ const Viewer = (() => {
     return { x: evt.clientX, y: evt.clientY };
   }
 
+  function screenIndexForHotspotId(id) {
+    const targetId = id.toLowerCase();
+    return screens.findIndex(
+      (scr) => Bundle.baseName(scr.name).toLowerCase() === targetId
+    );
+  }
+
+  function hitTestHotspots(rects, frame, x, y) {
+    for (const h of rects) {
+      const left = frame.left + (h.x / frame.refW) * frame.width;
+      const top = frame.top + (h.y / frame.refH) * frame.height;
+      const w = (h.w / frame.refW) * frame.width;
+      const hgt = (h.h / frame.refH) * frame.height;
+
+      if (x >= left && x <= left + w && y >= top && y <= top + hgt) {
+        return h.id;
+      }
+    }
+    return null;
+  }
+
   function handleTap(evt) {
     if (Date.now() < ignoreClickUntil) return;
 
-    const screen = screens[index]?.name;
+    const screen = screens[index];
     if (!screen) return;
 
-    const data = hotspotData[screen];
-    const rects = data?.rects ?? [];
-    const frame = getFrame(data);
     const { x, y } = pointerCoords(evt);
+    const overlayEls = [...overlaysEl.querySelectorAll('.viewer-overlay')];
 
+    for (let i = overlayEls.length - 1; i >= 0; i -= 1) {
+      const overlay = screen.overlays?.[i];
+      if (!overlay) continue;
+
+      const rects = overlay.hotspotData?.rects ?? [];
+      if (rects.length === 0) continue;
+
+      const frame = getFrame(overlayEls[i], overlay.hotspotData);
+      const hitId = hitTestHotspots(rects, frame, x, y);
+      if (hitId) {
+        const targetIndex = screenIndexForHotspotId(hitId);
+        if (targetIndex !== -1) show(targetIndex);
+        return;
+      }
+    }
+
+    const data = hotspotData[screen.name];
+    const rects = data?.rects ?? [];
     if (rects.length > 0) {
-      for (let h of rects) {
-        const left = frame.left + (h.x / frame.refW) * frame.width;
-        const top = frame.top + (h.y / frame.refH) * frame.height;
-        const w = (h.w / frame.refW) * frame.width;
-        const hgt = (h.h / frame.refH) * frame.height;
-
-        if (x >= left && x <= left + w && y >= top && y <= top + hgt) {
-          const targetIndex = screens.findIndex((scr) => scr.name.startsWith(h.id));
-          if (targetIndex !== -1) show(targetIndex);
-          return;
-        }
+      const frame = getFrame(img, data);
+      const hitId = hitTestHotspots(rects, frame, x, y);
+      if (hitId) {
+        const targetIndex = screenIndexForHotspotId(hitId);
+        if (targetIndex !== -1) show(targetIndex);
       }
       return;
     }
@@ -398,16 +569,16 @@ const Viewer = (() => {
     if (index < screens.length - 1) show(index + 1);
   }
 
-  img.addEventListener('click', handleTap);
-  img.addEventListener('touchstart', handleTouchStart, { passive: true });
-  img.addEventListener('touchend', handleTouchEnd, { passive: false });
-  img.addEventListener('touchcancel', resetTwoFingerGesture, { passive: true });
+  viewer.addEventListener('click', handleTap);
+  viewer.addEventListener('touchstart', handleTouchStart, { passive: true });
+  viewer.addEventListener('touchend', handleTouchEnd, { passive: false });
+  viewer.addEventListener('touchcancel', resetTwoFingerGesture, { passive: true });
 
   function setOnExit(fn) {
     onExit = fn;
   }
 
-  return { mount, img, setOnExit };
+  return { mount, viewer, setOnExit };
 })();
 
 /* ── Landing UI (tall-mode bitmap scale) ─────────────────────────────────── */
@@ -466,7 +637,7 @@ const App = (() => {
 
   function enterLanding() {
     landing.hidden = false;
-    Viewer.img.hidden = true;
+    Viewer.viewer.hidden = true;
 
     if (savedBundleMeta) {
       landingMeta.textContent = savedBundleMeta.label;
@@ -482,7 +653,7 @@ const App = (() => {
 
   function enterViewer() {
     landing.hidden = true;
-    Viewer.img.hidden = false;
+    Viewer.viewer.hidden = false;
   }
 
   function setLoading(loading) {
