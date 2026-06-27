@@ -123,6 +123,7 @@ function handleTap(evt) {
         return;
       }
     }
+    return;
   }
 
   if (index < screens.length - 1) show(index + 1);
