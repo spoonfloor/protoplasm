@@ -263,6 +263,29 @@ const Bundle = (() => {
     }
   }
 
+  async function loadAlphaMask(url) {
+    const img = new Image();
+    img.src = url;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const pixels = ctx.getImageData(0, 0, w, h).data;
+    const alpha = new Uint8Array(w * h);
+    for (let i = 0; i < alpha.length; i += 1) {
+      alpha[i] = pixels[i * 4 + 3];
+    }
+    return { alpha, w, h };
+  }
+
   async function buildOverlay(fileMap, svgByBase, name, blobUrls) {
     const key = parseOverlayKey(name);
     if (!key) return null;
@@ -273,11 +296,19 @@ const Bundle = (() => {
     const url = URL.createObjectURL(blob);
     blobUrls.push(url);
 
+    let alphaMask = null;
+    try {
+      alphaMask = await loadAlphaMask(url);
+    } catch {
+      /* fall back to bounding-box hit testing in the viewer */
+    }
+
     return {
       anchor: key.anchor,
       name,
       url,
       hotspotData: await loadHotspotData(svgByBase, fileMap, baseName(name)),
+      alphaMask,
     };
   }
 
@@ -409,6 +440,7 @@ const Viewer = (() => {
 
   const TAP_MAX_MS = 350;
   const DOUBLE_TAP_WINDOW_MS = 450;
+  const ALPHA_THRESHOLD = 10;
 
   let screens = [];
   let index = 0;
@@ -567,6 +599,36 @@ const Viewer = (() => {
     return null;
   }
 
+  function pointInFrame(x, y, frame) {
+    return (
+      x >= frame.left &&
+      x <= frame.left + frame.width &&
+      y >= frame.top &&
+      y <= frame.top + frame.height
+    );
+  }
+
+  function overlayBlocksTap(overlay, el, x, y) {
+    const frame = getFrame(el, overlay.hotspotData);
+    if (!pointInFrame(x, y, frame)) return false;
+
+    const mask = overlay.alphaMask;
+    if (mask) {
+      const px = Math.min(
+        mask.w - 1,
+        Math.max(0, Math.floor(((x - frame.left) / frame.width) * mask.w))
+      );
+      const py = Math.min(
+        mask.h - 1,
+        Math.max(0, Math.floor(((y - frame.top) / frame.height) * mask.h))
+      );
+      return mask.alpha[py * mask.w + px] > ALPHA_THRESHOLD;
+    }
+
+    const box = el.getBoundingClientRect();
+    return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+  }
+
   function handleTap(evt) {
     if (Date.now() < ignoreClickUntil) return;
 
@@ -580,16 +642,18 @@ const Viewer = (() => {
       const overlay = screen.overlays?.[i];
       if (!overlay) continue;
 
-      const rects = overlay.hotspotData?.rects ?? [];
-      if (rects.length === 0) continue;
+      if (!overlayBlocksTap(overlay, overlayEls[i], x, y)) continue;
 
-      const frame = getFrame(overlayEls[i], overlay.hotspotData);
-      const hitId = hitTestHotspots(rects, frame, x, y);
-      if (hitId) {
-        const targetIndex = screenIndexForHotspotId(hitId);
-        if (targetIndex !== -1) show(targetIndex);
-        return;
+      const rects = overlay.hotspotData?.rects ?? [];
+      if (rects.length > 0) {
+        const frame = getFrame(overlayEls[i], overlay.hotspotData);
+        const hitId = hitTestHotspots(rects, frame, x, y);
+        if (hitId) {
+          const targetIndex = screenIndexForHotspotId(hitId);
+          if (targetIndex !== -1) show(targetIndex);
+        }
       }
+      return;
     }
 
     const data = hotspotData[screen.name];
